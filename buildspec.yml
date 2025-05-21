@@ -1,0 +1,55 @@
+---
+version: 0.2
+phases:
+  install:
+    commands:
+      - curl -sS -o aws-iam-authenticator https://amazon-eks.s3-us-west-2.amazonaws.com/1.10.3/2018-07-26/bin/linux/amd64/aws-iam-authenticator
+      - curl -sS -o kubectl https://amazon-eks.s3-us-west-2.amazonaws.com/1.14.6/2019-08-22/bin/linux/amd64/kubectl
+      - chmod +x ./kubectl ./aws-iam-authenticator
+      - export PATH=$PWD/:$PATH
+      - apt-get update && apt-get -y install jq python3-pip python3-dev && pip3 install --upgrade awscli
+  pre_build:
+      commands:
+        - TAG="$REPOSITORY_NAME.$REPOSITORY_BRANCH.$SERVICE_ONE.$(date +%Y-%m-%d.%H.%M.%S).$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
+        - echo $TAG
+        - echo $REPOSITORY_URI
+        - echo $REPOSITORY_URI:$TAG
+        - sed -i 's@CONTAINER_IMAGE@'"$REPOSITORY_URI:$TAG"'@' developer-iq.yml
+        - SERVICE_TWO_TAG="$REPOSITORY_NAME.$REPOSITORY_BRANCH.$SERVICE_TWO.$(date +%Y-%m-%d.%H.%M.%S).$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
+        - echo $SERVICE_TWO_TAG
+        - echo $REPOSITORY_URI
+        - echo $REPOSITORY_URI:$SERVICE_TWO_TAG
+        - sed -i 's@CONTAINER_IMAGE_TWO@'"$REPOSITORY_URI:$SERVICE_TWO_TAG"'@' developer-iq-tracker.yml
+        - $(aws ecr get-login --no-include-email)
+        - export KUBECONFIG=$HOME/.kube/config
+        - echo Logging in to Docker Hub...
+        - echo $DOCKERHUB_TOKEN | docker login -u $DOCKERHUB_USERNAME --password-stdin
+  build:
+    commands:
+      - cd developer-score-tracker-service
+      - npm install
+      - npm run test:integration || exit 1
+      - docker build -t $REPOSITORY_URI:$SERVICE_TWO_TAG .
+      - docker push $REPOSITORY_URI:$SERVICE_TWO_TAG
+      - cd ..
+      - cd developer-score-calculator-service
+      - npm install
+      - npm run test:integration || exit 1
+      - docker build -t $REPOSITORY_URI:$TAG .
+      - docker push $REPOSITORY_URI:$TAG
+      - cd ..
+
+  post_build:
+    commands:
+      - CREDENTIALS=$(aws sts assume-role --role-arn $EKS_KUBECTL_ROLE_ARN --role-session-name codebuild-kubectl --duration-seconds 900)
+      - export AWS_ACCESS_KEY_ID="$(echo ${CREDENTIALS} | jq -r '.Credentials.AccessKeyId')"
+      - export AWS_SECRET_ACCESS_KEY="$(echo ${CREDENTIALS} | jq -r '.Credentials.SecretAccessKey')"
+      - export AWS_SESSION_TOKEN="$(echo ${CREDENTIALS} | jq -r '.Credentials.SessionToken')"
+      - export AWS_EXPIRATION=$(echo ${CREDENTIALS} | jq -r '.Credentials.Expiration')
+      - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME
+      - kubectl apply -f developer-iq.yml
+      - kubectl apply -f developer-iq-tracker.yml
+      - printf '[{"name":"developer-iq","imageUri":"%s"}]' $REPOSITORY_URI:$TAG > build.json
+      - printf '[{"name":"developer-iq-tracker","imageUri":"%s"}]' $REPOSITORY_URI:$SERVICE_TWO_TAG > build.json
+artifacts:
+  files: build.json
