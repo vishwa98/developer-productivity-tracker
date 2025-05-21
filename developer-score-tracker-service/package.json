@@ -1,0 +1,21 @@
+{
+  "name": "developeriq-tracker",
+  "version": "1.0.0",
+  "description": "Developer productivity tracker",
+  "main": "index.js",
+  "scripts": {
+    "test:integration": "mocha ./integration.test.js"
+  },
+  "author": "Vishwa Siriwardena",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.1502.0",
+    "axios": "^1.6.2",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "chai": "^4.3.10",
+    "chai-http": "^4.4.0",
+    "mocha": "^10.2.0"
+  }
+}
